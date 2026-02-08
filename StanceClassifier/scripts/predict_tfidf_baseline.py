@@ -11,6 +11,72 @@ import pickle
 import numpy as np
 import pandas as pd
 from sklearn.metrics import accuracy_score, classification_report, f1_score
+from scipy.sparse import hstack
+
+try:
+    from textblob import TextBlob
+    TEXTBLOB_AVAILABLE = True
+except ImportError:
+    TEXTBLOB_AVAILABLE = False
+
+# Stance-specific keywords
+SUPPORT_KEYWORDS = [
+    'agree', 'support', 'correct', 'right', 'true', 'yes', 'absolutely', 
+    'exactly', 'definitely', 'indeed', 'confirm', 'verify', 'valid', 'accurate',
+    'approve', 'endorse', 'backing', 'concur', 'second', 'affirm', 'totally',
+    'completely', 'precisely', 'spot on', 'well said', 'truth', 'fact', 'real'
+]
+
+DENY_KEYWORDS = [
+    'disagree', 'wrong', 'false', 'no', 'not', 'never', 'against', 'oppose',
+    'incorrect', 'untrue', 'fake', 'lie', 'misinformation', 'doubt', 'reject',
+    'deny', 'refute', 'contradict', 'dispute', 'challenge', 'nonsense', 'nope'
+]
+
+QUERY_KEYWORDS = [
+    'what', 'why', 'how', 'when', 'where', 'who', 'which', 'really',
+    'source', 'proof', 'evidence', 'citation', 'link', 'explain',
+    'elaborate', 'clarify', 'context', 'wonder', 'curious', 'question'
+]
+
+
+def extract_stance_keywords(text):
+    """Extract stance keyword counts from text."""
+    text_lower = text.lower()
+    support_count = sum(1 for word in SUPPORT_KEYWORDS if word in text_lower)
+    deny_count = sum(1 for word in DENY_KEYWORDS if word in text_lower)
+    query_count = sum(1 for word in QUERY_KEYWORDS if word in text_lower)
+    return support_count, deny_count, query_count
+
+
+def extract_sentiment(text):
+    """Extract sentiment polarity and subjectivity."""
+    if not TEXTBLOB_AVAILABLE:
+        return 0.0, 0.0
+    try:
+        sentiment = TextBlob(text).sentiment
+        return sentiment.polarity, sentiment.subjectivity
+    except:
+        return 0.0, 0.0
+
+
+def create_enhanced_features(texts, tfidf_features):
+    """Combine TF-IDF with keyword and sentiment features."""
+    keyword_features = []
+    sentiment_features = []
+    
+    for text in texts:
+        support_kw, deny_kw, query_kw = extract_stance_keywords(text)
+        keyword_features.append([support_kw, deny_kw, query_kw])
+        
+        polarity, subjectivity = extract_sentiment(text)
+        sentiment_features.append([polarity, subjectivity])
+    
+    keyword_features = np.array(keyword_features, dtype=np.float32)
+    sentiment_features = np.array(sentiment_features, dtype=np.float32)
+    
+    enhanced_features = hstack([tfidf_features, keyword_features, sentiment_features])
+    return enhanced_features
 
 
 def parse_args():
@@ -41,10 +107,12 @@ def main():
     labels_list = metadata["labels"]
     id2label = {int(k): v for k, v in metadata["id2label"].items()}
     mode = metadata.get("mode", "aware")
+    use_enhanced_features = metadata.get("useEnhancedFeatures", False)
 
     print(f"[INFO] Loaded model metadata")
     print(f"[INFO] Labels: {labels_list}")
     print(f"[INFO] Mode: {mode}")
+    print(f"[INFO] Enhanced features: {use_enhanced_features}")
 
     # Load TF-IDF vectorizer
     tfidf_path = os.path.join(args.model_dir, "tfidf_vectorizer.pkl")
@@ -76,8 +144,16 @@ def main():
         texts = replies
 
     # Vectorize
-    X = tfidf.transform(texts)
+    X_tfidf = tfidf.transform(texts)
     print(f"[INFO] Vectorized {len(texts)} samples")
+    
+    # Create enhanced features if model was trained with them
+    if use_enhanced_features:
+        print(f"[INFO] Adding stance keywords and sentiment features...")
+        X = create_enhanced_features(texts, X_tfidf)
+        print(f"[INFO] Enhanced feature shape: {X.shape}")
+    else:
+        X = X_tfidf
 
     # Predict
     predictions = lr_model.predict(X)

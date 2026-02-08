@@ -26,9 +26,103 @@ from sklearn.metrics import (
     precision_recall_fscore_support,
     classification_report,
 )
+from scipy.sparse import hstack
+
+try:
+    from textblob import TextBlob
+    TEXTBLOB_AVAILABLE = True
+except ImportError:
+    TEXTBLOB_AVAILABLE = False
+    print("[WARN] TextBlob not available. Install with: pip install textblob")
+
+try:
+    from imblearn.over_sampling import SMOTE
+    SMOTE_AVAILABLE = True
+except ImportError:
+    SMOTE_AVAILABLE = False
 
 
 DEFAULT_LABELS = ["support", "deny", "query", "comment"]
+
+# Stance-specific keywords for enhanced features
+SUPPORT_KEYWORDS = [
+    'agree', 'support', 'correct', 'right', 'true', 'yes', 'absolutely', 
+    'exactly', 'definitely', 'indeed', 'confirm', 'verify', 'valid', 'accurate',
+    'approve', 'endorse', 'backing', 'concur', 'second', 'affirm', 'totally',
+    'completely', 'precisely', 'spot on', 'well said', 'truth', 'fact', 'real',
+    # Extended support keywords
+    'agreed', 'supporting', 'confirmed', 'exactly right', 'so true', 'amen',
+    'preach', '+1', 'this', 'same', 'ditto', 'likewise', 'same here', 'me too',
+    'finally', 'glad', 'thank you', 'appreciate', 'kudos', 'bravo', 'well done',
+    'perfect', 'brilliant', 'excellent', 'outstanding', 'accurate', 'valid point',
+    'good point', 'fair point', 'makes sense', 'convinced', 'i believe'
+]
+
+DENY_KEYWORDS = [
+    'disagree', 'wrong', 'false', 'no', 'not', 'never', 'against', 'oppose',
+    'incorrect', 'untrue', 'fake', 'lie', 'misinformation', 'doubt', 'reject',
+    'deny', 'refute', 'contradict', 'dispute', 'challenge', 'nonsense', 'nope',
+    # Extended deny keywords
+    'bullshit', 'bs', 'rubbish', 'ridiculous', 'absurd', 'nonsensical',
+    'debunk', 'debunked', 'myth', 'propaganda', 'hoax', 'scam', 'fraud',
+    'misleading', 'distortion', 'fabrication', 'false claim', 'not true',
+    'thats wrong', "that's wrong", 'you are wrong', 'youre wrong', "you're wrong",
+    'no way', 'cant believe', "can't believe", 'seriously?', 'really?'
+]
+
+QUERY_KEYWORDS = [
+    'what', 'why', 'how', 'when', 'where', 'who', 'which', 'really',
+    'source', 'proof', 'evidence', 'citation', 'link', 'explain',
+    'elaborate', 'clarify', 'context', 'wonder', 'curious', 'question',
+    # Extended query keywords
+    '?', 'asking', 'wonder', 'wondering', 'anyone know', 'does anyone',
+    'can someone', 'please explain', 'i dont understand', "i don't understand",
+    'confused', 'unsure', 'uncertain', 'verify this', 'is this true',
+    'confirm this', 'show me', 'need proof', 'got source', 'link please'
+]
+
+
+def extract_stance_keywords(text: str) -> Tuple[int, int, int]:
+    """Extract stance keyword counts from text."""
+    text_lower = text.lower()
+    support_count = sum(1 for word in SUPPORT_KEYWORDS if word in text_lower)
+    deny_count = sum(1 for word in DENY_KEYWORDS if word in text_lower)
+    query_count = sum(1 for word in QUERY_KEYWORDS if word in text_lower)
+    return support_count, deny_count, query_count
+
+
+def extract_sentiment(text: str) -> Tuple[float, float]:
+    """Extract sentiment polarity and subjectivity."""
+    if not TEXTBLOB_AVAILABLE:
+        return 0.0, 0.0
+    try:
+        sentiment = TextBlob(text).sentiment
+        return sentiment.polarity, sentiment.subjectivity
+    except:
+        return 0.0, 0.0
+
+
+def create_enhanced_features(texts: List[str], tfidf_features):
+    """Combine TF-IDF with keyword and sentiment features."""
+    keyword_features = []
+    sentiment_features = []
+    
+    for text in texts:
+        # Extract keyword features
+        support_kw, deny_kw, query_kw = extract_stance_keywords(text)
+        keyword_features.append([support_kw, deny_kw, query_kw])
+        
+        # Extract sentiment features
+        polarity, subjectivity = extract_sentiment(text)
+        sentiment_features.append([polarity, subjectivity])
+    
+    # Convert to arrays
+    keyword_features = np.array(keyword_features, dtype=np.float32)
+    sentiment_features = np.array(sentiment_features, dtype=np.float32)
+    
+    # Combine all features
+    enhanced_features = hstack([tfidf_features, keyword_features, sentiment_features])
+    return enhanced_features
 
 
 def parseArgs() -> argparse.Namespace:
@@ -54,7 +148,9 @@ def parseArgs() -> argparse.Namespace:
     parser.add_argument("--max-features", type=int, default=5000, help="Max features for TF-IDF")
     parser.add_argument("--ngram-range", type=str, default="1,2", help="N-gram range (e.g., '1,2' for unigrams+bigrams)")
     parser.add_argument("--C", type=float, default=1.0, help="Inverse regularization strength")
-    parser.add_argument("--class-weight", choices=["balanced", None], default=None, help="Use balanced class weights to handle imbalanced data")
+    parser.add_argument("--class-weight", choices=["balanced", None], default="balanced", help="Use balanced class weights to handle imbalanced data")
+    parser.add_argument("--use-enhanced-features", action="store_true", default=True, help="Add stance keywords and sentiment features")
+    parser.add_argument("--use-smote", action="store_true", default=False, help="Apply SMOTE oversampling for minority classes")
     parser.add_argument("--seed", type=int, default=42, help="Random seed")
     return parser.parse_args()
 
@@ -215,12 +311,60 @@ def main():
         lowercase=True,
         stop_words="english",
     )
-    XTrain = tfidf.fit_transform(trainTexts)
-    print(f"[INFO] TF-IDF vectorizer trained. Feature shape: {XTrain.shape}")
+    XTrain_tfidf = tfidf.fit_transform(trainTexts)
+    print(f"[INFO] TF-IDF vectorizer trained. Feature shape: {XTrain_tfidf.shape}")
+    
+    # Create enhanced features if enabled
+    if args.use_enhanced_features:
+        print(f"[INFO] Adding stance keywords and sentiment features...")
+        XTrain = create_enhanced_features(trainTexts, XTrain_tfidf)
+        print(f"[INFO] Enhanced feature shape: {XTrain.shape}")
+        print(f"[INFO] Added {XTrain.shape[1] - XTrain_tfidf.shape[1]} new features (keywords + sentiment)")
+    else:
+        XTrain = XTrain_tfidf
+    
+    # Apply SMOTE if enabled
+    if args.use_smote:
+        if not SMOTE_AVAILABLE:
+            print("[WARN] SMOTE not available. Install with: pip install imbalanced-learn")
+            print("[WARN] Skipping SMOTE oversampling")
+        else:
+            print(f"\n[INFO] Applying SMOTE oversampling...")
+            print(f"[INFO] Before SMOTE: {np.bincount(trainLabels)}")
+            
+            # Target: make minority classes at least 30% of majority class
+            majority_count = max(np.bincount(trainLabels))
+            target_count = int(majority_count * 0.3)
+            
+            sampling_strategy = {
+                0: max(target_count, np.bincount(trainLabels)[0]),  # support
+                1: max(target_count, np.bincount(trainLabels)[1]),  # deny
+                2: max(target_count, np.bincount(trainLabels)[2]),  # query
+            }
+            
+            smote = SMOTE(sampling_strategy=sampling_strategy, random_state=args.seed)
+            XTrain, trainLabels = smote.fit_resample(XTrain, trainLabels)
+            
+            print(f"[INFO] After SMOTE: {np.bincount(trainLabels)}")
+            print(f"[INFO] New training set size: {len(trainLabels)}")
 
     # Train Logistic Regression
     print(f"\n[INFO] Training Logistic Regression model...")
-    classWeight = "balanced" if args.class_weight == "balanced" else None
+    # Custom class weights - heavily boost minority classes
+    if args.class_weight == "balanced":
+        # Calculate balanced weights but multiply support/deny/query by additional factor
+        from sklearn.utils.class_weight import compute_class_weight
+        base_weights = compute_class_weight('balanced', classes=np.unique(trainLabels), y=trainLabels)
+        classWeight = {
+            0: base_weights[0] * 3.0,  # support - 3x boost
+            1: base_weights[1] * 2.0,  # deny - 2x boost
+            2: base_weights[2] * 2.0,  # query - 2x boost
+            3: base_weights[3]         # comment - normal
+        }
+        print(f"[INFO] Custom class weights: {classWeight}")
+    else:
+        classWeight = None
+    
     lrModel = LogisticRegression(
         C=args.C,
         max_iter=1000,
@@ -245,7 +389,11 @@ def main():
     # Evaluate on validation data if provided
     if valTexts:
         print(f"\n[INFO] === VALIDATION SET ===")
-        XVal = tfidf.transform(valTexts)
+        XVal_tfidf = tfidf.transform(valTexts)
+        if args.use_enhanced_features:
+            XVal = create_enhanced_features(valTexts, XVal_tfidf)
+        else:
+            XVal = XVal_tfidf
         valPreds = lrModel.predict(XVal)
         valAcc = accuracy_score(valLabels, valPreds)
         valF1 = f1_score(valLabels, valPreds, average="macro")
@@ -257,7 +405,11 @@ def main():
     # Evaluate on test data if provided
     if testTexts:
         print(f"\n[INFO] === TEST SET ===")
-        XTest = tfidf.transform(testTexts)
+        XTest_tfidf = tfidf.transform(testTexts)
+        if args.use_enhanced_features:
+            XTest = create_enhanced_features(testTexts, XTest_tfidf)
+        else:
+            XTest = XTest_tfidf
         testPreds = lrModel.predict(XTest)
         testAcc = accuracy_score(testLabels, testPreds)
         testF1 = f1_score(testLabels, testPreds, average="macro")
@@ -289,6 +441,8 @@ def main():
         "id2label": id2Label,
         "maxFeatures": args.max_features,
         "ngramRange": ngramRange,
+        "useEnhancedFeatures": args.use_enhanced_features,
+        "classWeight": args.class_weight,
         "trainSamples": len(trainTexts),
         "trainAccuracy": float(trainAcc),
         "trainF1": float(trainF1),

@@ -10,7 +10,13 @@ from transformers import AutoModelForSequenceClassification,AutoTokenizer
 
 class StanceClassifier:
 
-    def __init__(self, model="GateNLP/stance-twitter-xlm-target-oblivious", feature_extractor=None):
+    def __init__(self, model="GateNLP/stance-bertweet-target-aware", feature_extractor=None):
+        """
+        Initialize stance classifier.
+        
+        Default model changed to target-aware for better performance.
+        Use 'GateNLP/stance-twitter-xlm-target-oblivious' for target-oblivious variant.
+        """
         if not feature_extractor:
             # Create a plain Features() instance loading its tokenizer from
             # the same place as the model
