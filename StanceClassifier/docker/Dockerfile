@@ -23,13 +23,8 @@ COPY StanceClassifier /app/StanceClassifier
 COPY docker/elg_stance.py docker/docker_classifier.py /app/
 COPY docker/docker-entrypoint.sh /app/docker-entrypoint.sh
 
-# Copy data and models (optional - may be mounted as volumes instead)
-COPY data /app/data 2>/dev/null || true
-COPY models /app/models 2>/dev/null || true
-COPY scripts /app/scripts 2>/dev/null || true
-
-# Create necessary directories
-RUN mkdir -p /app/data/processed /app/data/raw /app/logs /app/setup.d && \
+# Create necessary directories (data and models will be mounted as volumes)
+RUN mkdir -p /app/data/processed /app/data/raw /app/models /app/scripts /app/logs /app/setup.d && \
     chmod +x /app/docker-entrypoint.sh
 
 # Set environment variables
