@@ -1,0 +1,9 @@
+nltk
+numpy<1.20
+scipy<1.6
+scikit-learn<0.25
+pandas<1.2
+flask
+gunicorn
+emoji
+protobuf<4
