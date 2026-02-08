@@ -1,33 +1,18 @@
-# Logic to configure and load the correct classifier for the Docker container
-# based on environment variable settings
+# This file is kept for backwards compatibility
+# The classifier is now initialized directly in elg_stance.py
 
 import os
+from StanceClassifier.stance_classifier import StanceClassifier
 
-# STANCE_CLASSIFIER_MODE should be set to "oblivious" for target-oblivious mode,
-# "aware" for target-aware mode with a single model, or "ensemble" for target-aware
-# mode using an ensemble of two models
-classifier_mode = os.environ.get("STANCE_CLASSIFIER_MODE", "oblivious")
-oblivious_mode = (classifier_mode == "oblivious")
+# Get model path from environment or use default
+model_path = os.environ.get('MODEL_PATH', 'models/sentence_embedding_baseline')
 
-if oblivious_mode:
-    from StanceClassifier.stance_classifier import StanceClassifier
-    args = {}
-    if os.environ.get("STANCE_CLASSIFIER_OBLIVIOUS_MODEL", "default") != "default":
-        args["model"] = os.environ["STANCE_CLASSIFIER_OBLIVIOUS_MODEL"]
-    classifier = StanceClassifier(**args)
-else:
-    ensemble_mode = (classifier_mode == "ensemble")
-    if ensemble_mode:
-        from StanceClassifier.stance_classifier import StanceClassifierEnsemble
-        args = {}
-        if os.environ.get("STANCE_CLASSIFIER_OBLIVIOUS_MODEL", "default") != "default":
-            args["to_model"] = os.environ["STANCE_CLASSIFIER_OBLIVIOUS_MODEL"]
-        if os.environ.get("STANCE_CLASSIFIER_AWARE_MODEL", "default") != "default":
-            args["ta_model"] = os.environ["STANCE_CLASSIFIER_AWARE_MODEL"]
-        classifier = StanceClassifierEnsemble(**args)
-    else:
-        from StanceClassifier.stance_classifier import StanceClassifierWithTarget
-        args = {}
-        if os.environ.get("STANCE_CLASSIFIER_AWARE_MODEL", "default") != "default":
-            args["model"] = os.environ["STANCE_CLASSIFIER_AWARE_MODEL"]
-        classifier = StanceClassifierWithTarget(**args)
+# Initialize classifier
+try:
+    classifier = StanceClassifier(model_path=model_path)
+except Exception as e:
+    print(f"Warning: Could not initialize classifier: {e}")
+    classifier = None
+
+print(f"Classifier initialized with model: {model_path}")
+

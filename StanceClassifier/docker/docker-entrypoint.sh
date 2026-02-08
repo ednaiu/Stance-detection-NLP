@@ -1,11 +1,23 @@
 #!/bin/sh
 
-# Allow for setup shell scripts to be injected to set up environment variables
-# etc. before we execute the main process
-for f in setup.d/*.sh ; do
+# Entry point for the stance detection container
+# Starts the Flask API server
+
+set -e
+
+# Allow for setup shell scripts to be injected
+for f in /app/setup.d/*.sh ; do
   if [ -r "$f" ]; then
     . "$f"
   fi
 done
 
-exec /usr/bin/tini -- venv/bin/gunicorn -b=0.0.0.0:8000 "--workers=$WORKERS" "$@" elg_stance:app
+# Start Flask application with Gunicorn
+exec python -m gunicorn \
+  --bind 0.0.0.0:5000 \
+  --workers "${WORKERS:-1}" \
+  --worker-class sync \
+  --timeout 300 \
+  --access-logfile - \
+  --error-logfile - \
+  elg_stance:app

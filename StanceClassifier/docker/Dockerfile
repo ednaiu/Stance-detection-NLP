@@ -1,67 +1,47 @@
-FROM python:3.12-slim as base
+FROM python:3.10-slim
 
-# Install tini and create an unprivileged user
+# Install system dependencies
 RUN apt-get update && \
     apt-get install -y \
-      tini \
-    && rm -rf /var/lib/apt/lists/* && \
-    addgroup --gid 1001 "elg" && \
-    adduser --disabled-password --gecos "ELG User,,," \
-      --home /elg --ingroup elg --uid 1001 elg && \
-    install -m 700 -g 1001 -o 1001 -d /elg/.cache
+      git \
+      wget \
+      curl \
+      ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
 
-# Copy in requirements file for the venv
-COPY requirements.txt /elg/
+# Set working directory
+WORKDIR /app
 
-# Everything from here down runs as the unprivileged user account
-USER 1001:1001
+# Copy requirements file
+COPY requirements.txt .
 
-WORKDIR /elg
+# Install Python dependencies
+RUN pip install --no-cache-dir -r requirements.txt
 
-# Create a Python virtual environment for the dependencies
-# We mount a cache which we use for pip. This means that
-# repeat builds are much much quicker as we don't need to
-# re-download all the dependencies. In this instance we've
-# used a none default directory so that ~/.cache doesn't end
-# up owned by root and so that when we run the classifier
-# torch can cache it's downloads in the normal place
-RUN --mount=type=cache,target=/elg/.pip-cache,uid=1001 python -mvenv venv && venv/bin/pip --cache-dir /elg/.pip-cache install -r requirements.txt
+# Copy project structure
+COPY StanceClassifier /app/StanceClassifier
+COPY docker/elg_stance.py docker/docker_classifier.py /app/
+COPY docker/docker-entrypoint.sh /app/docker-entrypoint.sh
 
-COPY --chown=1001:1001 StanceClassifier /elg/StanceClassifier
-COPY --chown=1001:1001 docker/elg_stance.py docker/docker_classifier.py docker/docker-entrypoint.sh /elg/
+# Copy data and models (optional - may be mounted as volumes instead)
+COPY data /app/data 2>/dev/null || true
+COPY models /app/models 2>/dev/null || true
+COPY scripts /app/scripts 2>/dev/null || true
 
-# copy in any extra models from the context, which can subsequently be referenced as
-# ./extra-models/<name> in the build args.  The [s] is a trick so that this instruction
-# won't fail if (as in the default case) no such extra models exist.
-COPY --chown=1001:1001 docker/extra-model[s] /elg/extra-models
+# Create necessary directories
+RUN mkdir -p /app/data/processed /app/data/raw /app/logs /app/setup.d && \
+    chmod +x /app/docker-entrypoint.sh
 
-ENTRYPOINT ["./docker-entrypoint.sh"]
+# Set environment variables
+ENV PYTHONUNBUFFERED=1
+ENV PYTHONPATH=/app:$PYTHONPATH
 
-FROM base as oblivious
+# Expose ports
+EXPOSE 5000 8888
 
-ARG MODEL=default
-ENV STANCE_CLASSIFIER_MODE=oblivious STANCE_CLASSIFIER_OBLIVIOUS_MODEL=$MODEL
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --retries=3 --start-period=40s \
+    CMD curl -f http://localhost:5000/health || exit 1
 
-# Run one classify, to pre-cache any download-on-first-use things
-RUN ["venv/bin/python", "-c", "from docker_classifier import classifier\nclassifier.classify({'text':'reply'})"]
-
-ENV WORKERS=1 REQUEST_SIZE_LIMIT=100000 HF_HUB_OFFLINE=1 HF_DATASETS_OFFLINE=1
-
-FROM base as aware
-
-ARG MODEL=default
-ENV STANCE_CLASSIFIER_MODE=aware STANCE_CLASSIFIER_AWARE_MODEL=$MODEL
-
-RUN ["venv/bin/python", "-c", "from docker_classifier import classifier\nclassifier.classify_with_target({'text':'reply', 'id_str':'2', 'in_reply_to_status_id_str':'1'}, {'text':'orig', 'id_str':'1'})"]
-
-ENV WORKERS=1 REQUEST_SIZE_LIMIT=100000 HF_HUB_OFFLINE=1 HF_DATASETS_OFFLINE=1
-
-FROM base as ensemble
-
-ARG MODEL_TO=default
-ARG MODEL_TA=default
-ENV STANCE_CLASSIFIER_MODE=ensemble STANCE_CLASSIFIER_OBLIVIOUS_MODEL=$MODEL_TO STANCE_CLASSIFIER_AWARE_MODEL=$MODEL_TA
-
-RUN ["venv/bin/python", "-c", "from docker_classifier import classifier\nclassifier.classify_with_target({'text':'reply', 'id_str':'2', 'in_reply_to_status_id_str':'1'}, {'text':'orig', 'id_str':'1'})"]
-
-ENV WORKERS=1 REQUEST_SIZE_LIMIT=100000 HF_HUB_OFFLINE=1 HF_DATASETS_OFFLINE=1
+# Entry point
+ENTRYPOINT ["/app/docker-entrypoint.sh"]

@@ -1,0 +1,53 @@
+version: '3.8'
+
+services:
+  stance-classifier:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    container_name: stance-classifier-api
+    restart: unless-stopped
+    ports:
+      - "5000:5000"    # Flask API
+    volumes:
+      - ../data:/app/data              # Data directory
+      - ../models:/app/models          # Pre-trained models
+      - ../scripts:/app/scripts        # Training/prediction scripts
+      - ../StanceClassifier:/app/StanceClassifier  # Source code
+    environment:
+      - PYTHONUNBUFFERED=1
+      - MODEL_PATH=models/sentence_embedding_baseline
+      - WORKERS=1
+      - FLASK_ENV=production
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    networks:
+      - stance-network
+
+  # Optional: Jupyter development service
+  jupyter:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    container_name: stance-classifier-jupyter
+    restart: unless-stopped
+    ports:
+      - "8888:8888"
+    volumes:
+      - ..:/app
+    environment:
+      - PYTHONUNBUFFERED=1
+    command: jupyter notebook --ip=0.0.0.0 --no-browser --allow-root --NotebookApp.token='' --NotebookApp.password=''
+    networks:
+      - stance-network
+    profiles:
+      - dev  # Run with: docker-compose --profile dev up
+
+networks:
+  stance-network:
+    driver: bridge
+
