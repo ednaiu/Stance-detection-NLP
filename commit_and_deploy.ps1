@@ -7,7 +7,13 @@ param(
 
 $ErrorActionPreference = "Stop"
 
-Write-Host "=== Git Commit and Push ===" -ForegroundColor Green
+# Load environment variables if .env exists
+if (Test-Path ".env") {
+    Write-Host "=== Loading environment variables ===" -ForegroundColor Green
+    . .\load_env.ps1
+}
+
+Write-Host "`n=== Git Commit and Push ===" -ForegroundColor Green
 
 # Check for changes
 $status = git status --porcelain
