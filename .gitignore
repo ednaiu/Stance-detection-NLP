@@ -13,3 +13,18 @@ checkpoints/
 .vscode/
 .idea/
 .DS_Store
+
+# local artifacts (do not commit)
+checkpoints/
+*.log
+
+# python cache
+__pycache__/
+*.pyc
+
+# ignore artifacts everywhere (outer repo)
+**/data/
+**/checkpoints/
+**/*.log
+**/__pycache__/
+**/*.pyc
