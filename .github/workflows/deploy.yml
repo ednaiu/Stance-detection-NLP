@@ -25,23 +25,22 @@ jobs:
       run: |
         docker save stance-classifier:latest | gzip > stance-classifier.tar.gz
     
+    - name: Install sshpass
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y sshpass
+    
     - name: Deploy to remote host
       env:
         REMOTE_HOST: ${{ secrets.REMOTE_HOST }}
         REMOTE_USER: ${{ secrets.REMOTE_USER }}
-        SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+        REMOTE_PASSWORD: ${{ secrets.REMOTE_PASSWORD }}
       run: |
-        # Setup SSH
-        mkdir -p ~/.ssh
-        echo "$SSH_PRIVATE_KEY" > ~/.ssh/id_rsa
-        chmod 600 ~/.ssh/id_rsa
-        ssh-keyscan -H $REMOTE_HOST >> ~/.ssh/known_hosts
-        
-        # Copy Docker image to remote host
-        scp stance-classifier.tar.gz $REMOTE_USER@$REMOTE_HOST:/tmp/
+        # Copy Docker image to remote host using password
+        sshpass -p "$REMOTE_PASSWORD" scp -o StrictHostKeyChecking=no stance-classifier.tar.gz $REMOTE_USER@$REMOTE_HOST:/tmp/
         
         # Load and run on remote host
-        ssh $REMOTE_USER@$REMOTE_HOST << 'EOF'
+        sshpass -p "$REMOTE_PASSWORD" ssh -o StrictHostKeyChecking=no $REMOTE_USER@$REMOTE_HOST << 'EOF'
           # Load Docker image
           docker load < /tmp/stance-classifier.tar.gz
           
@@ -57,6 +56,7 @@ jobs:
             -v /data/stance-detection/data:/app/data \
             -v /data/stance-detection/models:/app/models \
             -e MODEL_PATH=models/sentence_embedding_baseline \
+            -e WORKERS=2 \
             stance-classifier:latest
           
           # Cleanup
@@ -64,4 +64,5 @@ jobs:
           
           # Show status
           docker ps | grep stance-classifier
+          docker logs --tail 20 stance-classifier
         EOF
